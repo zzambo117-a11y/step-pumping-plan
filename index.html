@@ -253,7 +253,8 @@ const RATIOS = [0.4, 0.6, 0.8, 1.0];
 const KEY = 'step-plan-v2';   // 측정 시각 변경 시 키를 바꿔 예전 저장값과 섞이지 않게 함
 const $ = id => document.getElementById(id);
 const num = v => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : NaN; };
-const fx = (v, d) => isFinite(v) ? v.toFixed(d) : '–';
+// Number.isFinite: null을 0으로 보지 않음 (전역 isFinite(null)은 true라 해석값이 없을 때 오류가 났음)
+const fx = (v, d) => Number.isFinite(v) ? v.toFixed(d) : '–';
 
 let state = { levels: EXAMPLE.slice(), example: true, steps: RATIOS.map(r => ({ q: Math.round(100 * r), d: 60 })) };
 const FIELDS = ['well', 'nat', 'pump', 'margin', 'cap', 'qp', 'dia', 't0', 'sf', 'plan'];
@@ -545,7 +546,7 @@ $('mapply').addEventListener('click', () => {
 calcMeter();
 
 // 엑셀 다운로드 (downloads 기능이 있는 화면에서만 버튼 표시)
-const r3 = v => isFinite(v) ? Math.round(v * 1000) / 1000 : '';
+const r3 = v => Number.isFinite(v) ? Math.round(v * 1000) / 1000 : '';
 function buildWorkbook() {
   const { P, R, fit, sAt } = last;
   const well = $('well').value || '시험정';
