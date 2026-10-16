@@ -204,7 +204,7 @@ textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color
     <div class="stepc" id="plancard">
       <div class="top"><b>취수계획량 검토</b><span class="chip ok" id="pchip">–</span></div>
       <div class="out">
-        <div>240분 연속 강하 (m)<span id="ps">–</span></div>
+        <div id="pslbl">240분 연속 강하 (m)<span id="ps">–</span></div>
         <div>예상 수위 (m)<span id="pw">–</span></div>
         <div>펌프까지 여유 (m)<span id="pm">–</span></div>
       </div>
@@ -228,10 +228,10 @@ textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const TIMES = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30];
-const EXAMPLE = [30.62, 31.05, 31.30, 31.46, 31.56, 31.65, 31.81, 31.92, 32.01, 32.12, 32.24, 32.33, 32.40];
+const TIMES = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30];
+const EXAMPLE = [30.62, 31.05, 31.30, 31.46, 31.56, 31.92, 32.12, 32.24, 32.33, 32.40];
 const RATIOS = [0.4, 0.6, 0.8, 1.0];
-const KEY = 'step-plan-v1';
+const KEY = 'step-plan-v2';   // 측정 시각 변경 시 키를 바꿔 예전 저장값과 섞이지 않게 함
 const $ = id => document.getElementById(id);
 const num = v => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : NaN; };
 const fx = (v, d) => isFinite(v) ? v.toFixed(d) : '–';
@@ -321,7 +321,12 @@ function calc() {
   }
   R.avail = P.pump - P.margin - P.nat;
   const sAt = (q, t) => q / P.qp * Math.max(0, fit.a + fit.b * Math.log10(t));
-  if (fit) R.qmax = R.avail / (P.sf * (fit.a + fit.b * Math.log10(240)) / P.qp);
+  // 본 시험 총 양수시간 = 단계별 양수시간 합 (단계마다 30분, 60분 등 다를 수 있음)
+  const steps = state.steps.map(s => ({ q: num(s.q), d: num(s.d) }));
+  let t = 0; steps.forEach(s => { s.start = t; t += s.d; s.end = t; });
+  R.total = t; R.steps = steps;
+  R.dur = t > 0 && isFinite(t) ? t : 240;
+  if (fit) R.qmax = R.avail / (P.sf * (fit.a + fit.b * Math.log10(R.dur)) / P.qp);
 
   // 통계
   const stat = (k, v, u, key) => `<div class="stat${key ? ' key' : ''}"><span class="k">${k}</span><span class="v">${v}<small>${u}</small></span></div>`;
@@ -333,7 +338,7 @@ function calc() {
     stat('저류계수 S (참고)', isFinite(R.S) ? R.S.toExponential(1) : '–', ''),
     stat('30분 s/Q', fx(R.sq30, 5), '일/m²'),
     stat('가용 수위강하', fx(R.avail, 2), 'm'),
-    stat('240분 최대 양수량', fx(R.qmax, 0), 'm³/일', 1),
+    stat(`${R.dur}분 연속 최대 양수량`, fx(R.qmax, 0), 'm³/일', 1),
   ].join('');
   const fw = $('fitwarn');
   if (!fit) { fw.hidden = false; fw.textContent = '해석 시작시간 이후 수위가 2개 이상 있어야 계산됩니다.'; }
@@ -342,9 +347,6 @@ function calc() {
   else fw.hidden = true;
 
   // 단계 예측
-  const steps = state.steps.map(s => ({ q: num(s.q), d: num(s.d) }));
-  let t = 0; steps.forEach(s => { s.start = t; t += s.d; s.end = t; });
-  R.total = t; R.steps = steps;
   steps.forEach((s, i) => {
     if (fit && fit.b > 0 && steps.slice(0, i + 1).every(x => isFinite(x.q) && x.d > 0)) {
       let sum = 0;
@@ -360,12 +362,13 @@ function calc() {
     else { c.className = 'chip ok'; c.textContent = '가능'; }
   });
 
-  // 취수계획량 검토: 계획량 240분 연속양수 + 단계 범위 포함 여부
+  // 취수계획량 검토: 계획량으로 본 시험 총 시간 연속양수 + 단계 범위 포함 여부
   const pc = $('pchip'), maxQ = Math.max(...steps.map(s => s.q).filter(isFinite));
   R.plan = {};
   if (fit && fit.b > 0 && P.plan > 0) {
-    R.plan.sw = P.sf * sAt(P.plan, 240); R.plan.wl = P.nat + R.plan.sw; R.plan.room = P.pump - R.plan.wl;
+    R.plan.sw = P.sf * sAt(P.plan, R.dur); R.plan.wl = P.nat + R.plan.sw; R.plan.room = P.pump - R.plan.wl;
   }
+  $('pslbl').firstChild.textContent = `${R.dur}분 연속 강하 (m)`;
   $('ps').textContent = fx(R.plan.sw, 2); $('pw').textContent = fx(R.plan.wl, 2); $('pm').textContent = fx(R.plan.room, 2);
   const covered = maxQ >= P.plan;
   if (!isFinite(R.plan.room)) { pc.className = 'chip warn'; pc.textContent = '입력 확인'; }
@@ -458,10 +461,10 @@ function writeOut() {
     `[단계양수 계획 - ${$('well').value}] (30분 예비시험 기반 예측값)`,
     `자연수위 ${P.nat} m / 펌프 ${P.pump} m / 예비 Qp ${P.qp} m³/일 / 안전율 ${P.sf}`,
     `Δs ${fx(fit && fit.b, 3)} m, a ${fx(fit && fit.a, 3)} m, R² ${fx(fit && fit.r2, 3)}`,
-    `T ${fx(R.T, 2)} m²/일, S(참고) ${isFinite(R.S) ? R.S.toExponential(1) : '–'}, 가용강하 ${fx(R.avail, 2)} m, 240분 최대Q ${fx(R.qmax, 0)} m³/일`,
+    `T ${fx(R.T, 2)} m²/일, S(참고) ${isFinite(R.S) ? R.S.toExponential(1) : '–'}, 가용강하 ${fx(R.avail, 2)} m, ${R.dur}분 연속 최대Q ${fx(R.qmax, 0)} m³/일`,
     '예비시험 수위: ' + R.pts.map(p => `${p.t}분 ${(p.s + P.nat).toFixed(2)}`).join(', '),
     ...R.steps.map((s, i) => `${i + 1}단계 Q=${s.q} (${s.start}~${s.end}분): 예상강하 ${fx(s.sw, 2)} m, 수위 ${fx(s.wl, 2)} m, 펌프여유 ${fx(s.room, 2)} m — ${$('c' + i).textContent}`),
-    `취수계획량 ${P.plan} m³/일 240분 연속: 예상강하 ${fx(R.plan.sw, 2)} m, 수위 ${fx(R.plan.wl, 2)} m, 펌프여유 ${fx(R.plan.room, 2)} m — ${$('pchip').textContent}`,
+    `취수계획량 ${P.plan} m³/일 ${R.dur}분 연속: 예상강하 ${fx(R.plan.sw, 2)} m, 수위 ${fx(R.plan.wl, 2)} m, 펌프여유 ${fx(R.plan.room, 2)} m — ${$('pchip').textContent}`,
   ];
   $('out').value = lines.join('\n');
 }
@@ -525,7 +528,7 @@ function buildWorkbook() {
     ['기울기 Δs (m/log주기)', r3(fit && fit.b)], ['절편 a (m, t=1분)', r3(fit && fit.a)], ['결정계수 R²', r3(fit && fit.r2)],
     ['투수량계수 T (m²/일)', r3(R.T)], ['저류계수 S (참고)', isFinite(R.S) ? Number(R.S.toPrecision(2)) : ''],
     ['30분 비수위강하 s/Q (일/m²)', isFinite(R.sq30) ? Number(R.sq30.toFixed(5)) : ''],
-    ['가용 수위강하 (m)', r3(R.avail)], ['240분 연속양수 최대 양수량 (m³/일)', isFinite(R.qmax) ? Math.round(R.qmax) : ''],
+    ['가용 수위강하 (m)', r3(R.avail)], [`${R.dur}분 연속양수 최대 양수량 (m³/일)`, isFinite(R.qmax) ? Math.round(R.qmax) : ''],
   ], [34, 16]), '입력·해석');
   XLSX.utils.book_append_sheet(wb, sheet([
     ['경과시간 (분)', '수위 (m)', '수위강하 s (m)', '해석 사용'],
@@ -535,7 +538,7 @@ function buildWorkbook() {
     ['단계', '양수량 Q (m³/일)', '양수시간 (분)', '시작 (분)', '종료 (분)', '예상 수위강하 (m)', '예상 종료수위 (m)', '펌프까지 여유 (m)', '판정'],
     ...R.steps.map((s, i) => [`${i + 1}단계`, s.q, s.d, s.start, s.end, r3(s.sw), r3(s.wl), r3(s.room), $('c' + i).textContent]),
     [],
-    ['취수계획량 검토', P.plan, 240, 0, 240, r3(R.plan.sw), r3(R.plan.wl), r3(R.plan.room), $('pchip').textContent],
+    ['취수계획량 검토', P.plan, R.dur, 0, R.dur, r3(R.plan.sw), r3(R.plan.wl), r3(R.plan.room), $('pchip').textContent],
     [],
     ['예상 강하 = 안전율 × Σ ΔQj/Qp × (a + Δs·log t), Jacob 중첩. 고양수량 단계는 우물손실(CQ²)로 더 깊어질 수 있음.'],
   ], [16, 16, 13, 10, 10, 16, 16, 16, 20]), '단계 계획');
