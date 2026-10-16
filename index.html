@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f6b82">
+<title>단계양수 현장계획</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+[hidden] { display: none !important; }
+html { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; }
+/* Layout: one narrow column of field "cards" in work order — 입력 → 30분 측정 → 해석 → 단계 계획 */
+:root {
+  --bg: #eef2f4;
+  --surface: #ffffff;
+  --fg: #16232b;
+  --muted: #5b6b75;
+  --line: #d3dde2;
+  --accent: #0f6b82;
+  --accent-soft: #dcedf1;
+  --input: #fff8e1;
+  --ok: #1d7a4a;
+  --ok-soft: #e0f2e8;
+  --warn: #9a5b00;
+  --warn-soft: #fdf0d8;
+  --bad: #b3261e;
+  --bad-soft: #fbe3e1;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e171c; --surface: #16222a; --fg: #e3ecf0; --muted: #93a6b0; --line: #2a3a44;
+    --accent: #5cc0d8; --accent-soft: #173842; --input: #2a2615;
+    --ok: #6fd39c; --ok-soft: #173326; --warn: #f0b860; --warn-soft: #3a2c12; --bad: #ff8a80; --bad-soft: #3d1c1a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e171c; --surface: #16222a; --fg: #e3ecf0; --muted: #93a6b0; --line: #2a3a44;
+  --accent: #5cc0d8; --accent-soft: #173842; --input: #2a2615;
+  --ok: #6fd39c; --ok-soft: #173326; --warn: #f0b860; --warn-soft: #3a2c12; --bad: #ff8a80; --bad-soft: #3d1c1a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 40px;
+}
+.wrap { max-width: 560px; margin: 0 auto; display: grid; gap: 14px; }
+header h1 { font-size: 21px; margin: 4px 0 2px; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); font-size: 13px; }
+.notice { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 500; }
+section { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 12px; min-width: 0; }
+h2 { font-size: 15px; margin: 0; display: flex; align-items: baseline; gap: 8px; }
+h2 .step { font-family: var(--font-num); font-size: 12px; color: var(--accent); letter-spacing: .04em; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+label.f { display: grid; gap: 3px; font-size: 12.5px; color: var(--muted); min-width: 0; }
+input[type="text"], input[type="number"], input:not([type]) {
+  font: 600 16px var(--font-num); color: var(--fg); background: var(--input);
+  border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%; min-width: 0;
+}
+input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+button {
+  font: 600 14px var(--font-body); border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--fg); padding: 10px 14px; cursor: pointer; min-height: 44px;
+}
+button.primary { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* 타이머 */
+.timer { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; }
+.timer .clock { font: 600 30px var(--font-num); font-variant-numeric: tabular-nums; }
+.timer .next { font-size: 13px; color: var(--muted); }
+/* 측정표 */
+.tbl { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th { font-size: 12px; color: var(--muted); font-weight: 500; text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+td { padding: 4px 6px; text-align: right; font-family: var(--font-num); font-size: 14px; border-bottom: 1px solid var(--line); }
+td input { padding: 7px 8px; font-size: 15px; text-align: right; }
+tr.due td { background: var(--accent-soft); }
+td.use { font-family: var(--font-body); color: var(--muted); font-size: 12px; }
+td.use.on { color: var(--accent); font-weight: 700; }
+/* 결과 */
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.stat { background: var(--surface); padding: 9px 11px; display: grid; gap: 1px; min-width: 0; }
+.stat .k { font-size: 12px; color: var(--muted); }
+.stat .v { font: 600 18px var(--font-num); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stat .v small { font: 400 11px var(--font-body); color: var(--muted); margin-left: 3px; }
+.stat.key .v { color: var(--accent); }
+svg { width: 100%; height: auto; display: block; }
+svg text { fill: var(--muted); font: 10px var(--font-num); }
+svg .grid { stroke: var(--line); stroke-width: 1; }
+svg .axis { stroke: var(--muted); stroke-width: 1; }
+svg .pt { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+svg .pt.used { fill: var(--accent); }
+svg .fit { stroke: var(--fg); stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }
+svg .curve { stroke: var(--accent); stroke-width: 2.2; fill: none; }
+svg .pump { stroke: var(--bad); stroke-width: 1.5; stroke-dasharray: 6 4; }
+svg .limit { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 2 3; }
+svg .lbl-bad { fill: var(--bad); }
+svg .lbl-warn { fill: var(--warn); }
+/* 단계 카드 */
+.steps { display: grid; gap: 8px; }
+.stepc { border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: grid; gap: 8px; }
+.stepc .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.stepc .top b { font-size: 14px; }
+.chip { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+.stepc .out { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.stepc .out div { display: grid; font-size: 11.5px; color: var(--muted); min-width: 0; }
+.stepc .out span { font: 600 15px var(--font-num); color: var(--fg); font-variant-numeric: tabular-nums; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--accent); vertical-align: middle; margin-right: 4px; }
+.legend i.p { border-top: 2px dashed var(--bad); }
+.legend i.m { width: 8px; height: 8px; border: 2px solid var(--accent); border-radius: 50%; }
+.toast { font-size: 13px; color: var(--ok); min-height: 1em; }
+textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.warnline { font-size: 12.5px; color: var(--warn); margin: 0; }
+@media (max-width: 360px) { .grid2, .stats { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>단계양수 현장계획</h1>
+    <p>30분 예비양수 실측 → Cooper-Jacob 해석 → 단계양수시험 양수량 계획</p>
+  </header>
+  <div class="notice">이 화면의 단계별 수위는 30분 자료로 추정한 계획값입니다. 단계양수시험일보는 실측 자료로 작성하세요.</div>
+
+  <section>
+    <h2><span class="step">STEP 1</span>관정·예비시험 조건</h2>
+    <div class="grid2">
+      <label class="f">관정명<input id="well" type="text" value="PW-11"></label>
+      <label class="f">자연수위 (m)<input id="nat" inputmode="decimal" value="29.64"></label>
+      <label class="f">펌프 설치심도 (m)<input id="pump" inputmode="decimal" value="50"></label>
+      <label class="f">펌프 위 안전여유 (m)<input id="margin" inputmode="decimal" value="3"></label>
+      <label class="f">양수능력 (m³/일)<input id="cap" inputmode="decimal" value="100"></label>
+      <label class="f">예비 양수량 Qp (m³/일)<input id="qp" inputmode="decimal" value="50"></label>
+      <label class="f">취수계획량 (m³/일)<input id="plan" inputmode="decimal" value="80"></label>
+      <label class="f">안전율 (1.0~1.5)<input id="sf" inputmode="decimal" value="1.2"></label>
+      <label class="f">굴착지름 (mm)<input id="dia" inputmode="decimal" value="200"></label>
+      <label class="f">해석 시작시간 (분)<input id="t0" inputmode="decimal" value="5"></label>
+    </div>
+    <p class="hint">예비 양수량: 30분 동안 실제로 퍼낸 양(유량계 실측). L/min × 1.44 = m³/일. 취수계획량: 허가·신고서의 하루 사용 계획량. 안전율: 고양수량 단계의 우물손실 보정값, 보통 1.2.</p>
+    <p class="hint">굴착지름: 암반관정은 하부 나공 구간, 충적관정은 스크린 구간 지름. 저류계수 S(참고)에만 쓰이며 모르면 200 그대로 두세요.</p>
+    <p class="hint">펌프 위 안전여유: 수위가 펌프 위로 최소 이만큼은 남아야 한다는 값입니다. 모르면 3 m 그대로 두세요. 소형 수중펌프는 보통 2~3 m면 충분합니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="step">STEP 2</span>30분 수위 측정</h2>
+    <div class="timer">
+      <div>
+        <div class="clock" id="clock">00:00</div>
+        <div class="next" id="next">양수 시작과 동시에 시작을 누르세요</div>
+      </div>
+      <div class="row">
+        <button class="primary" id="tbtn" type="button">시작</button>
+        <button id="treset" type="button">리셋</button>
+      </div>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>경과(분)</th><th>수위 (m)</th><th>강하 s (m)</th><th>해석</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="row">
+      <button id="example" type="button">예시값 넣기</button>
+      <button id="clear" type="button">수위 지우기</button>
+    </div>
+    <p class="hint" id="exnote">현재 들어 있는 수위는 예시값입니다. 실측값으로 덮어쓰세요.</p>
+  </section>
+
+  <section>
+    <h2><span class="step">STEP 3</span>해석 결과</h2>
+    <div class="stats" id="stats"></div>
+    <p class="warnline" id="fitwarn" hidden></p>
+    <svg id="semilog" viewBox="0 0 340 200" role="img" aria-label="수위강하 대 로그 시간 그래프"></svg>
+    <p class="hint">● 해석에 쓴 점 ○ 제외한 점 — 점선은 직선 회귀. T = 0.183·Qp / Δs. S는 양수정 자료라 참고값입니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="step">STEP 4</span>단계양수시험 계획</h2>
+    <div class="row">
+      <button id="auto" type="button">양수능력 40·60·80·100%로 채우기</button>
+    </div>
+    <div class="steps" id="steps"></div>
+    <div class="stepc" id="plancard">
+      <div class="top"><b>취수계획량 검토</b><span class="chip ok" id="pchip">–</span></div>
+      <div class="out">
+        <div>240분 연속 강하 (m)<span id="ps">–</span></div>
+        <div>예상 수위 (m)<span id="pw">–</span></div>
+        <div>펌프까지 여유 (m)<span id="pm">–</span></div>
+      </div>
+      <p class="hint" id="pnote"></p>
+    </div>
+    <div class="legend"><span><i></i>예상 수위</span><span><i class="p"></i>펌프 설치심도</span><span><i class="m"></i>예비시험 실측</span></div>
+    <svg id="curve" viewBox="0 0 340 220" role="img" aria-label="단계별 예상 수위 곡선"></svg>
+    <p class="hint">예상 강하 = 안전율 × Σ ΔQj/Qp × (a + Δs·log t) (Jacob 중첩). 실제로는 고양수량 단계에서 우물손실(CQ²) 때문에 더 깊어질 수 있습니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="step">기록</span>결과 저장</h2>
+    <div class="row">
+      <button class="primary" id="xlsx" type="button" hidden>엑셀 다운로드</button>
+      <button id="copy" type="button">결과 텍스트 복사</button>
+      <span class="toast" id="toast"></span>
+    </div>
+    <textarea id="out" rows="8" readonly></textarea>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+const TIMES = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30];
+const EXAMPLE = [30.62, 31.05, 31.30, 31.46, 31.56, 31.65, 31.81, 31.92, 32.01, 32.12, 32.24, 32.33, 32.40];
+const RATIOS = [0.4, 0.6, 0.8, 1.0];
+const KEY = 'step-plan-v1';
+const $ = id => document.getElementById(id);
+const num = v => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : NaN; };
+const fx = (v, d) => isFinite(v) ? v.toFixed(d) : '–';
+
+let state = { levels: EXAMPLE.slice(), example: true, steps: RATIOS.map(r => ({ q: Math.round(100 * r), d: 60 })) };
+const FIELDS = ['well', 'nat', 'pump', 'margin', 'cap', 'qp', 'dia', 't0', 'sf', 'plan'];
+
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (!s) return;
+    FIELDS.forEach(k => { if (s.f && s.f[k] != null) $(k).value = s.f[k]; });
+    if (Array.isArray(s.levels)) state.levels = s.levels;
+    if (Array.isArray(s.steps)) state.steps = s.steps;
+    state.example = !!s.example;
+  } catch (e) {}
+}
+function save() {
+  try {
+    const f = {}; FIELDS.forEach(k => f[k] = $(k).value);
+    localStorage.setItem(KEY, JSON.stringify({ f, levels: state.levels, steps: state.steps, example: state.example }));
+  } catch (e) {}
+}
+
+function buildRows() {
+  $('rows').innerHTML = TIMES.map((t, i) =>
+    `<tr id="r${i}"><td>${t}</td><td><input id="lv${i}" inputmode="decimal" value="${state.levels[i] ?? ''}" aria-label="${t}분 수위"></td><td id="s${i}">–</td><td class="use" id="u${i}">–</td></tr>`).join('');
+  TIMES.forEach((t, i) => $('lv' + i).addEventListener('input', e => {
+    state.levels[i] = e.target.value; state.example = false; calc();
+  }));
+}
+function buildSteps() {
+  $('steps').innerHTML = state.steps.map((s, i) => `
+    <div class="stepc">
+      <div class="top"><b>${i + 1}단계</b><span class="chip ok" id="c${i}">–</span></div>
+      <div class="grid2">
+        <label class="f">양수량 (m³/일)<input id="q${i}" inputmode="decimal" value="${s.q}"></label>
+        <label class="f">양수시간 (분)<input id="d${i}" inputmode="decimal" value="${s.d}"></label>
+      </div>
+      <div class="out">
+        <div>예상 강하 (m)<span id="es${i}">–</span></div>
+        <div>예상 종료수위 (m)<span id="ew${i}">–</span></div>
+        <div>펌프까지 여유 (m)<span id="em${i}">–</span></div>
+      </div>
+    </div>`).join('');
+  state.steps.forEach((s, i) => {
+    $('q' + i).addEventListener('input', e => { state.steps[i].q = e.target.value; calc(); });
+    $('d' + i).addEventListener('input', e => { state.steps[i].d = e.target.value; calc(); });
+  });
+}
+
+function regress(xs, ys) {
+  const n = xs.length; if (n < 2) return null;
+  const mx = xs.reduce((a, b) => a + b) / n, my = ys.reduce((a, b) => a + b) / n;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let i = 0; i < n; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) ** 2; syy += (ys[i] - my) ** 2; }
+  if (sxx === 0) return null;
+  const b = sxy / sxx;
+  return { b, a: my - b * mx, r2: syy ? (sxy * sxy) / (sxx * syy) : 1 };
+}
+
+let last = null;
+function calc() {
+  const P = {}; FIELDS.slice(1).forEach(k => P[k] = num($(k).value));
+  $('exnote').hidden = !state.example;
+  const pts = [];
+  TIMES.forEach((t, i) => {
+    const wl = num(state.levels[i]);
+    const s = wl - P.nat;
+    const ok = isFinite(s);
+    const used = ok && t >= P.t0;
+    $('s' + i).textContent = ok ? s.toFixed(3) : '–';
+    $('u' + i).textContent = ok ? (used ? '사용' : '제외') : '–';
+    $('u' + i).className = 'use' + (used ? ' on' : '');
+    if (ok) pts.push({ t, s, used });
+  });
+  const use = pts.filter(p => p.used);
+  const fit = regress(use.map(p => Math.log10(p.t)), use.map(p => p.s));
+  const R = { pts, fit };
+  if (fit) {
+    R.T = 0.183 * P.qp / fit.b;
+    R.t0 = Math.pow(10, -fit.a / fit.b);
+    const rw = P.dia / 2000;   // 굴착지름(mm) → 반경(m)
+    R.S = 2.25 * R.T * (R.t0 / 1440) / (rw * rw);
+    const p30 = pts.find(p => p.t === 30);
+    R.sq30 = p30 ? p30.s / P.qp : NaN;
+  }
+  R.avail = P.pump - P.margin - P.nat;
+  const sAt = (q, t) => q / P.qp * Math.max(0, fit.a + fit.b * Math.log10(t));
+  if (fit) R.qmax = R.avail / (P.sf * (fit.a + fit.b * Math.log10(240)) / P.qp);
+
+  // 통계
+  const stat = (k, v, u, key) => `<div class="stat${key ? ' key' : ''}"><span class="k">${k}</span><span class="v">${v}<small>${u}</small></span></div>`;
+  $('stats').innerHTML = [
+    stat('투수량계수 T', fx(R.T, 2), 'm²/일', 1),
+    stat('기울기 Δs', fx(fit && fit.b, 3), 'm/log주기'),
+    stat('절편 a (t=1분)', fx(fit && fit.a, 3), 'm'),
+    stat('결정계수 R²', fx(fit && fit.r2, 3), ''),
+    stat('저류계수 S (참고)', isFinite(R.S) ? R.S.toExponential(1) : '–', ''),
+    stat('30분 s/Q', fx(R.sq30, 5), '일/m²'),
+    stat('가용 수위강하', fx(R.avail, 2), 'm'),
+    stat('240분 최대 양수량', fx(R.qmax, 0), 'm³/일', 1),
+  ].join('');
+  const fw = $('fitwarn');
+  if (!fit) { fw.hidden = false; fw.textContent = '해석 시작시간 이후 수위가 2개 이상 있어야 계산됩니다.'; }
+  else if (fit.b <= 0) { fw.hidden = false; fw.textContent = '수위강하가 시간에 따라 늘지 않습니다. 수위 입력을 확인하세요.'; }
+  else if (fit.r2 < 0.95) { fw.hidden = false; fw.textContent = `R² = ${fit.r2.toFixed(3)}로 직선성이 낮습니다. 해석 시작시간을 조정해 보세요.`; }
+  else fw.hidden = true;
+
+  // 단계 예측
+  const steps = state.steps.map(s => ({ q: num(s.q), d: num(s.d) }));
+  let t = 0; steps.forEach(s => { s.start = t; t += s.d; s.end = t; });
+  R.total = t; R.steps = steps;
+  steps.forEach((s, i) => {
+    if (fit && fit.b > 0 && steps.slice(0, i + 1).every(x => isFinite(x.q) && x.d > 0)) {
+      let sum = 0;
+      for (let j = 0; j <= i; j++) sum += sAt(steps[j].q - (j ? steps[j - 1].q : 0), s.end - steps[j].start);
+      s.sw = P.sf * sum; s.wl = P.nat + s.sw; s.room = P.pump - s.wl;
+    }
+    const c = $('c' + i);
+    $('es' + i).textContent = fx(s.sw, 2); $('ew' + i).textContent = fx(s.wl, 2); $('em' + i).textContent = fx(s.room, 2);
+    if (!isFinite(s.room)) { c.className = 'chip warn'; c.textContent = '입력 확인'; }
+    else if (i && s.q <= steps[i - 1].q) { c.className = 'chip warn'; c.textContent = '양수량 증가 필요'; }
+    else if (s.room < 0) { c.className = 'chip bad'; c.textContent = '위험: 펌프 노출'; }
+    else if (s.room < P.margin) { c.className = 'chip warn'; c.textContent = '주의: 안전여유 부족'; }
+    else { c.className = 'chip ok'; c.textContent = '가능'; }
+  });
+
+  // 취수계획량 검토: 계획량 240분 연속양수 + 단계 범위 포함 여부
+  const pc = $('pchip'), maxQ = Math.max(...steps.map(s => s.q).filter(isFinite));
+  R.plan = {};
+  if (fit && fit.b > 0 && P.plan > 0) {
+    R.plan.sw = P.sf * sAt(P.plan, 240); R.plan.wl = P.nat + R.plan.sw; R.plan.room = P.pump - R.plan.wl;
+  }
+  $('ps').textContent = fx(R.plan.sw, 2); $('pw').textContent = fx(R.plan.wl, 2); $('pm').textContent = fx(R.plan.room, 2);
+  const covered = maxQ >= P.plan;
+  if (!isFinite(R.plan.room)) { pc.className = 'chip warn'; pc.textContent = '입력 확인'; }
+  else if (R.plan.room < 0) { pc.className = 'chip bad'; pc.textContent = '위험: 펌프 노출'; }
+  else if (R.plan.room < P.margin) { pc.className = 'chip warn'; pc.textContent = '주의: 안전여유 부족'; }
+  else if (!covered) { pc.className = 'chip warn'; pc.textContent = '단계 최대Q < 계획량'; }
+  else { pc.className = 'chip ok'; pc.textContent = '가능'; }
+  $('pnote').textContent = !(P.plan > 0) ? '취수계획량을 입력하세요.'
+    : covered ? `${steps.findIndex(s => s.q >= P.plan) + 1}단계부터 취수계획량(${P.plan} m³/일) 이상으로 양수합니다.`
+    : `단계 최대 양수량 ${isFinite(maxQ) ? maxQ : '–'} m³/일이 취수계획량 ${P.plan} m³/일보다 작습니다. 마지막 단계 양수량을 계획량 이상으로 올리세요.`;
+  R.planCovered = covered;
+
+  last = { P, R, fit, sAt };
+  drawSemilog(); drawCurve(); writeOut(); save();
+}
+
+const NS = 'http://www.w3.org/2000/svg';
+function svgEl(svg, tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  svg.appendChild(e); return e;
+}
+function niceMax(v) { if (!(v > 0)) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p; return 10 * p; }
+
+function drawSemilog() {
+  const svg = $('semilog'); svg.innerHTML = '';
+  const { R, fit } = last; const W = 340, H = 200, L = 36, Rm = 10, T = 10, B = 28;
+  const xs = t => L + (Math.log10(t) - 0) / (Math.log10(100) - 0) * (W - L - Rm);
+  const ymax = niceMax(Math.max(0.1, ...R.pts.map(p => p.s)) * 1.1);
+  const ys = s => T + (1 - s / ymax) * (H - T - B);
+  [1, 2, 5, 10, 20, 50, 100].forEach(t => {
+    svgEl(svg, 'line', { class: 'grid', x1: xs(t), x2: xs(t), y1: T, y2: H - B });
+    svgEl(svg, 'text', { x: xs(t), y: H - B + 13, 'text-anchor': 'middle' }, t);
+  });
+  for (let i = 0; i <= 4; i++) {
+    const v = ymax * i / 4;
+    svgEl(svg, 'line', { class: 'grid', x1: L, x2: W - Rm, y1: ys(v), y2: ys(v) });
+    svgEl(svg, 'text', { x: L - 5, y: ys(v) + 3, 'text-anchor': 'end' }, +v.toFixed(2));
+  }
+  svgEl(svg, 'text', { x: (L + W) / 2, y: H - 2, 'text-anchor': 'middle' }, '경과시간 (분, log)');
+  svgEl(svg, 'text', { x: 10, y: T + 2, 'text-anchor': 'start', transform: `rotate(90 10 ${T + 2})` }, 's (m)');
+  if (fit) {
+    const f = t => fit.a + fit.b * Math.log10(t);
+    svgEl(svg, 'line', { class: 'fit', x1: xs(1), y1: ys(Math.max(0, Math.min(ymax, f(1)))), x2: xs(100), y2: ys(Math.min(ymax, f(100))) });
+  }
+  R.pts.forEach(p => svgEl(svg, 'circle', { class: 'pt' + (p.used ? ' used' : ''), cx: xs(p.t), cy: ys(p.s), r: 3.5 }));
+}
+
+function drawCurve() {
+  const svg = $('curve'); svg.innerHTML = '';
+  const { P, R, fit, sAt } = last; const W = 340, H = 220, L = 40, Rm = 10, T = 12, B = 28;
+  const total = Math.max(R.total || 0, 30);
+  const xs = t => L + t / total * (W - L - Rm);
+  const series = [];
+  const ok = fit && fit.b > 0 && R.steps.every(s => isFinite(s.q) && s.d > 0);
+  if (ok) for (let t = 1; t <= total; t++) {
+    let sum = 0;
+    R.steps.forEach((s, j) => { if (t > s.start) sum += sAt(s.q - (j ? R.steps[j - 1].q : 0), t - s.start); });
+    series.push([t, P.nat + P.sf * sum]);
+  }
+  const lo = Math.floor(P.nat - 1), hiRaw = Math.max(P.pump, ...series.map(p => p[1]), ...R.pts.map(p => p.s + P.nat)) + 1;
+  const hi = lo + niceMax(hiRaw - lo);
+  const ys = v => T + (v - lo) / (hi - lo) * (H - T - B);   // 깊을수록 아래
+  const step = niceMax((hi - lo) / 5);
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+    svgEl(svg, 'line', { class: 'grid', x1: L, x2: W - Rm, y1: ys(v), y2: ys(v) });
+    svgEl(svg, 'text', { x: L - 5, y: ys(v) + 3, 'text-anchor': 'end' }, +v.toFixed(1));
+  }
+  R.steps.forEach((s, i) => {
+    if (!(s.end > 0)) return;
+    svgEl(svg, 'line', { class: 'grid', x1: xs(s.end), x2: xs(s.end), y1: T, y2: H - B });
+    svgEl(svg, 'text', { x: xs((s.start + s.end) / 2), y: H - B + 13, 'text-anchor': 'middle' }, `${i + 1}단계`);
+  });
+  svgEl(svg, 'text', { x: W - Rm, y: H - 2, 'text-anchor': 'end' }, `${total}분`);
+  svgEl(svg, 'text', { x: L, y: H - 2, 'text-anchor': 'start' }, '0');
+  if (isFinite(P.pump)) {
+    svgEl(svg, 'line', { class: 'pump', x1: L, x2: W - Rm, y1: ys(P.pump), y2: ys(P.pump) });
+    svgEl(svg, 'text', { class: 'lbl-bad', x: W - Rm - 2, y: ys(P.pump) - 4, 'text-anchor': 'end' }, `펌프 ${P.pump} m`);
+    const lim = P.pump - P.margin;
+    svgEl(svg, 'line', { class: 'limit', x1: L, x2: W - Rm, y1: ys(lim), y2: ys(lim) });
+  }
+  if (series.length) svgEl(svg, 'polyline', { class: 'curve', points: series.map(([t, v]) => `${xs(t).toFixed(1)},${ys(v).toFixed(1)}`).join(' ') });
+  R.pts.forEach(p => svgEl(svg, 'circle', { class: 'pt', cx: xs(p.t), cy: ys(P.nat + p.s), r: 2.6 }));
+}
+
+function writeOut() {
+  const { P, R, fit } = last;
+  const lines = [
+    `[단계양수 계획 - ${$('well').value}] (30분 예비시험 기반 예측값)`,
+    `자연수위 ${P.nat} m / 펌프 ${P.pump} m / 예비 Qp ${P.qp} m³/일 / 안전율 ${P.sf}`,
+    `Δs ${fx(fit && fit.b, 3)} m, a ${fx(fit && fit.a, 3)} m, R² ${fx(fit && fit.r2, 3)}`,
+    `T ${fx(R.T, 2)} m²/일, S(참고) ${isFinite(R.S) ? R.S.toExponential(1) : '–'}, 가용강하 ${fx(R.avail, 2)} m, 240분 최대Q ${fx(R.qmax, 0)} m³/일`,
+    '예비시험 수위: ' + R.pts.map(p => `${p.t}분 ${(p.s + P.nat).toFixed(2)}`).join(', '),
+    ...R.steps.map((s, i) => `${i + 1}단계 Q=${s.q} (${s.start}~${s.end}분): 예상강하 ${fx(s.sw, 2)} m, 수위 ${fx(s.wl, 2)} m, 펌프여유 ${fx(s.room, 2)} m — ${$('c' + i).textContent}`),
+    `취수계획량 ${P.plan} m³/일 240분 연속: 예상강하 ${fx(R.plan.sw, 2)} m, 수위 ${fx(R.plan.wl, 2)} m, 펌프여유 ${fx(R.plan.room, 2)} m — ${$('pchip').textContent}`,
+  ];
+  $('out').value = lines.join('\n');
+}
+
+// 타이머: 다음 측정 시각 안내
+let tStart = null, tick = null, wake = null;
+function fmt(sec) { const m = Math.floor(sec / 60), s = Math.floor(sec % 60); return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
+function updTimer() {
+  if (tStart == null) return;
+  const sec = (Date.now() - tStart) / 1000; $('clock').textContent = fmt(sec);
+  const min = sec / 60, nxt = TIMES.findIndex(t => t > min - 0.25);
+  TIMES.forEach((t, i) => $('r' + i).classList.toggle('due', i === nxt));
+  $('next').textContent = nxt < 0 ? '30분 측정 완료' : `다음 측정: ${TIMES[nxt]}분 (${fmt(Math.max(0, TIMES[nxt] * 60 - sec))} 후)`;
+}
+$('tbtn').addEventListener('click', async () => {
+  if (tStart == null) {
+    tStart = Date.now(); tick = setInterval(updTimer, 500); $('tbtn').textContent = '정지'; updTimer();
+    try { wake = await navigator.wakeLock?.request('screen'); } catch (e) {}
+  } else {
+    clearInterval(tick); tStart = null; $('tbtn').textContent = '시작';
+    try { wake && wake.release(); } catch (e) {} wake = null;
+  }
+});
+$('treset').addEventListener('click', () => {
+  clearInterval(tick); tStart = null; $('tbtn').textContent = '시작'; $('clock').textContent = '00:00';
+  $('next').textContent = '양수 시작과 동시에 시작을 누르세요';
+  TIMES.forEach((t, i) => $('r' + i).classList.remove('due'));
+});
+
+$('example').addEventListener('click', () => { state.levels = EXAMPLE.slice(); state.example = true; buildRows(); calc(); });
+$('clear').addEventListener('click', () => { state.levels = TIMES.map(() => ''); state.example = false; buildRows(); calc(); });
+$('auto').addEventListener('click', () => {
+  const cap = num($('cap').value); if (!(cap > 0)) return;
+  state.steps = RATIOS.map((r, i) => ({ q: Math.round(cap * r), d: state.steps[i] ? state.steps[i].d : 60 }));
+  buildSteps(); calc();
+});
+$('copy').addEventListener('click', () => {
+  const ta = $('out');
+  const done = () => { $('toast').textContent = '복사했습니다'; setTimeout(() => $('toast').textContent = '', 2000); };
+  try {
+    navigator.clipboard.writeText(ta.value).then(done, () => { ta.select(); $('toast').textContent = '텍스트를 선택했습니다. 길게 눌러 복사하세요'; });
+  } catch (e) { ta.select(); }
+});
+FIELDS.forEach(k => $(k).addEventListener('input', calc));
+
+// 엑셀 다운로드 (downloads 기능이 있는 화면에서만 버튼 표시)
+const r3 = v => isFinite(v) ? Math.round(v * 1000) / 1000 : '';
+function buildWorkbook() {
+  const { P, R, fit, sAt } = last;
+  const well = $('well').value || '시험정';
+  const sheet = (rows, widths) => { const s = XLSX.utils.aoa_to_sheet(rows); s['!cols'] = widths.map(w => ({ wch: w })); return s; };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet([
+    ['30분 예비양수시험 해석 및 단계양수시험 계획 (예측값 — 단계양수시험일보 아님)'],
+    [],
+    ['관정명', well], ['자연수위 (m)', P.nat], ['펌프 설치심도 (m)', P.pump], ['펌프 위 안전여유 (m)', P.margin],
+    ['양수능력 (m³/일)', P.cap], ['예비 양수량 Qp (m³/일)', P.qp], ['취수계획량 (m³/일)', P.plan],
+    ['굴착지름 (mm)', P.dia], ['해석 시작시간 (분)', P.t0], ['안전율', P.sf],
+    [],
+    ['Cooper-Jacob 해석'],
+    ['기울기 Δs (m/log주기)', r3(fit && fit.b)], ['절편 a (m, t=1분)', r3(fit && fit.a)], ['결정계수 R²', r3(fit && fit.r2)],
+    ['투수량계수 T (m²/일)', r3(R.T)], ['저류계수 S (참고)', isFinite(R.S) ? Number(R.S.toPrecision(2)) : ''],
+    ['30분 비수위강하 s/Q (일/m²)', isFinite(R.sq30) ? Number(R.sq30.toFixed(5)) : ''],
+    ['가용 수위강하 (m)', r3(R.avail)], ['240분 연속양수 최대 양수량 (m³/일)', isFinite(R.qmax) ? Math.round(R.qmax) : ''],
+  ], [34, 16]), '입력·해석');
+  XLSX.utils.book_append_sheet(wb, sheet([
+    ['경과시간 (분)', '수위 (m)', '수위강하 s (m)', '해석 사용'],
+    ...R.pts.map(p => [p.t, r3(p.s + P.nat), r3(p.s), p.used ? '○' : '-']),
+  ], [14, 12, 14, 10]), '30분 실측');
+  XLSX.utils.book_append_sheet(wb, sheet([
+    ['단계', '양수량 Q (m³/일)', '양수시간 (분)', '시작 (분)', '종료 (분)', '예상 수위강하 (m)', '예상 종료수위 (m)', '펌프까지 여유 (m)', '판정'],
+    ...R.steps.map((s, i) => [`${i + 1}단계`, s.q, s.d, s.start, s.end, r3(s.sw), r3(s.wl), r3(s.room), $('c' + i).textContent]),
+    [],
+    ['취수계획량 검토', P.plan, 240, 0, 240, r3(R.plan.sw), r3(R.plan.wl), r3(R.plan.room), $('pchip').textContent],
+    [],
+    ['예상 강하 = 안전율 × Σ ΔQj/Qp × (a + Δs·log t), Jacob 중첩. 고양수량 단계는 우물손실(CQ²)로 더 깊어질 수 있음.'],
+  ], [16, 16, 13, 10, 10, 16, 16, 16, 20]), '단계 계획');
+  const curve = [['경과시간 (분)', '예상 수위강하 (m)', '예상 수위 (m)']];
+  if (fit && fit.b > 0) for (let t = 1; t <= R.total; t++) {
+    let sum = 0;
+    R.steps.forEach((s, j) => { if (t > s.start) sum += sAt(s.q - (j ? R.steps[j - 1].q : 0), t - s.start); });
+    curve.push([t, r3(P.sf * sum), r3(P.nat + P.sf * sum)]);
+  }
+  XLSX.utils.book_append_sheet(wb, sheet(curve, [14, 16, 14]), '예측곡선');
+  return XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+}
+(() => {
+  if (typeof XLSX === 'undefined') return;
+  const btn = $('xlsx'); btn.hidden = false;
+  btn.addEventListener('click', () => {
+    const d = new Date(), ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    try {
+      const blob = new Blob([buildWorkbook()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${$('well').value || '시험정'}_단계양수계획_${ymd}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      $('toast').textContent = '엑셀 파일을 내려받았습니다';
+    } catch (e) {
+      $('toast').textContent = '파일을 만들지 못했습니다. 결과 텍스트 복사를 이용하세요';
+    }
+  });
+})();
+
+load(); buildRows(); buildSteps(); calc();
+</script>
+</body>
+</html>
