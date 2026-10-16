@@ -128,6 +128,12 @@ svg .lbl-warn { fill: var(--warn); }
 .legend i.p { border-top: 2px dashed var(--bad); }
 .legend i.m { width: 8px; height: 8px; border: 2px solid var(--accent); border-radius: 50%; }
 .toast { font-size: 13px; color: var(--ok); min-height: 1em; }
+.meter { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; }
+.meter summary { font-weight: 700; font-size: 14px; color: var(--accent); cursor: pointer; min-height: 28px; }
+.meter > * + * { margin-top: 10px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.meterq { font: 600 18px var(--font-num); font-variant-numeric: tabular-nums; flex: 1; }
+button:disabled { opacity: .45; cursor: default; }
 textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 .warnline { font-size: 12.5px; color: var(--warn); margin: 0; }
 @media (max-width: 360px) { .grid2, .stats { grid-template-columns: 1fr; } }
@@ -157,6 +163,19 @@ textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color
       <label class="f">굴착지름 (mm)<input id="dia" inputmode="decimal" value="200"></label>
       <label class="f">해석 시작시간 (분)<input id="t0" inputmode="decimal" value="5"></label>
     </div>
+    <details class="meter" id="meter">
+      <summary>유량계 바늘로 양수량 계산</summary>
+      <div class="grid3">
+        <label class="f">시간 (초)<input id="ms" inputmode="decimal" placeholder="예: 12"></label>
+        <label class="f">용량 (L)<input id="mv" inputmode="decimal" value="10"></label>
+        <label class="f">회전수<input id="mn" inputmode="decimal" value="1"></label>
+      </div>
+      <div class="row">
+        <span class="meterq" id="mq">–</span>
+        <button class="primary" id="mapply" type="button" disabled>예비 양수량에 넣기</button>
+      </div>
+      <p class="hint">Q (m³/일) = 86400 ÷ 시간(초) × 용량(L) ÷ 1000 × 회전수. 예: 86400 ÷ 10초 × 50 L ÷ 1000 = 432 m³/일. 회전수는 여러 바퀴를 잴 때만 바꾸세요.</p>
+    </details>
     <p class="hint">예비 양수량: 30분 동안 실제로 퍼낸 양(유량계 실측). L/min × 1.44 = m³/일. 취수계획량: 허가·신고서의 하루 사용 계획량. 안전율: 고양수량 단계의 우물손실 보정값, 보통 1.2.</p>
     <p class="hint">굴착지름: 암반관정은 하부 나공 구간, 충적관정은 스크린 구간 지름. 저류계수 S(참고)에만 쓰이며 모르면 200 그대로 두세요.</p>
     <p class="hint">펌프 위 안전여유: 수위가 펌프 위로 최소 이만큼은 남아야 한다는 값입니다. 모르면 3 m 그대로 두세요. 소형 수중펌프는 보통 2~3 m면 충분합니다.</p>
@@ -509,6 +528,21 @@ $('copy').addEventListener('click', () => {
   } catch (e) { ta.select(); }
 });
 FIELDS.forEach(k => $(k).addEventListener('input', calc));
+
+// 유량계 바늘 환산: Q(m³/일) = 86400 / 시간(초) × 용량(L) / 1000 × 회전수
+let meterQ = NaN;
+function calcMeter() {
+  const v = num($('mv').value), n = num($('mn').value), sec = num($('ms').value);
+  meterQ = v > 0 && n > 0 && sec > 0 ? 86400 / sec * v / 1000 * n : NaN;
+  $('mq').textContent = isFinite(meterQ) ? `${meterQ.toFixed(1)} m³/일` : '–';
+  $('mapply').disabled = !isFinite(meterQ);
+}
+['mv', 'mn', 'ms'].forEach(k => $(k).addEventListener('input', calcMeter));
+$('mapply').addEventListener('click', () => {
+  if (!isFinite(meterQ)) return;
+  $('qp').value = meterQ.toFixed(1); calc();
+});
+calcMeter();
 
 // 엑셀 다운로드 (downloads 기능이 있는 화면에서만 버튼 표시)
 const r3 = v => isFinite(v) ? Math.round(v * 1000) / 1000 : '';
