@@ -1,0 +1,14 @@
+{
+  "name": "단계양수 현장계획",
+  "short_name": "단계양수",
+  "description": "30분 예비양수시험 기반 단계양수시험 계획",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#eef2f4",
+  "theme_color": "#0f6b82",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
