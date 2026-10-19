@@ -162,6 +162,7 @@ textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color
       <label class="f">안전율 (1.0~1.5)<input id="sf" inputmode="decimal" value="1.2"></label>
       <label class="f">굴착지름 (mm)<input id="dia" inputmode="decimal" value="200"></label>
       <label class="f">해석 시작시간 (분)<input id="t0" inputmode="decimal" value="5"></label>
+      <label class="f">우물손실계수 C (×10⁻⁴ 일²/m⁵)<input id="cw" inputmode="decimal" value="0"></label>
     </div>
     <details class="meter" id="meter">
       <summary>유량계 바늘로 양수량 계산</summary>
@@ -179,6 +180,7 @@ textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color
     <p class="hint">예비 양수량: 30분 동안 실제로 퍼낸 양(유량계 실측). L/min × 1.44 = m³/일. 취수계획량: 허가·신고서의 하루 사용 계획량. 안전율: 고양수량 단계의 우물손실 보정값, 보통 1.2.</p>
     <p class="hint">굴착지름: 암반관정은 하부 나공 구간, 충적관정은 스크린 구간 지름. 저류계수 S(참고)에만 쓰이며 모르면 200 그대로 두세요.</p>
     <p class="hint">펌프 위 안전여유: 수위가 펌프 위로 최소 이만큼은 남아야 한다는 값입니다. 모르면 3 m 그대로 두세요. 소형 수중펌프는 보통 2~3 m면 충분합니다.</p>
+    <p class="hint">우물손실계수 C: 우물손실 C·Q²의 계수. 0이면 비례 예측만 합니다. 값을 넣으면 Qp보다 큰 단계일수록 강하가 더 깊어지고, 작은 단계는 얕아집니다. 예: 1 입력 → Q=100 m³/일에서 우물손실 1 m. 같은 관정의 과거 단계양수시험 C가 있으면 그 값을 쓰고, C를 넣을 때는 안전율을 1.0 쪽으로 낮추세요.</p>
   </section>
 
   <section>
@@ -231,7 +233,7 @@ textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color
     </div>
     <div class="legend"><span><i></i>예상 수위</span><span><i class="p"></i>펌프 설치심도</span><span><i class="m"></i>예비시험 실측</span></div>
     <svg id="curve" viewBox="0 0 340 220" role="img" aria-label="단계별 예상 수위 곡선"></svg>
-    <p class="hint">예상 강하 = 안전율 × Σ ΔQj/Qp × (a + Δs·log t) (Jacob 중첩). 실제로는 고양수량 단계에서 우물손실(CQ²) 때문에 더 깊어질 수 있습니다.</p>
+    <p class="hint">예상 강하 = 안전율 × Σ ΔQj/Qp × (a + Δs·log t) + C·Q·(Q − Qp) (Jacob 중첩). C = 0이면 우물손실의 비선형 증가를 반영하지 않으므로, 고양수량 단계는 실제로 더 깊어질 수 있습니다.</p>
   </section>
 
   <section>
@@ -257,7 +259,7 @@ const num = v => { const x = parseFloat(String(v).replace(',', '.')); return isF
 const fx = (v, d) => Number.isFinite(v) ? v.toFixed(d) : '–';
 
 let state = { levels: EXAMPLE.slice(), example: true, steps: RATIOS.map(r => ({ q: Math.round(100 * r), d: 60 })) };
-const FIELDS = ['well', 'nat', 'pump', 'margin', 'cap', 'qp', 'dia', 't0', 'sf', 'plan'];
+const FIELDS = ['well', 'nat', 'pump', 'margin', 'cap', 'qp', 'dia', 't0', 'sf', 'plan', 'cw'];
 
 function load() {
   try {
@@ -346,7 +348,20 @@ function calc() {
   let t = 0; steps.forEach(s => { s.start = t; t += s.d; s.end = t; });
   R.total = t; R.steps = steps;
   R.dur = t > 0 && isFinite(t) ? t : 240;
-  if (fit) R.qmax = R.avail / (P.sf * (fit.a + fit.b * Math.log10(R.dur)) / P.qp);
+  // 우물손실: 30분 직선에는 Qp의 우물손실 C·Qp²가 이미 들어 있고, 비례 연장하면 C·Qp·Q가 되므로 차이 C·Q·(Q−Qp)만 더함
+  const C = P.cw > 0 ? P.cw * 1e-4 : 0;   // 입력은 ×10⁻⁴ 일²/m⁵
+  const wellLoss = q => C * q * (q - P.qp);
+  // 시각 t(분)의 총 예상 강하: 안전율 × Jacob 중첩 + 그 시각 양수량의 우물손실 보정
+  const sTot = t => {
+    let sum = 0, q = 0;
+    steps.forEach((s, j) => { if (t > s.start) { sum += sAt(s.q - (j ? steps[j - 1].q : 0), t - s.start); q = s.q; } });
+    return Math.max(0, P.sf * sum + wellLoss(q));
+  };
+  if (fit) {
+    // avail = k·Q + C·Q·(Q−Qp) 를 Q에 대해 풂 (C=0이면 직선)
+    const k = P.sf * (fit.a + fit.b * Math.log10(R.dur)) / P.qp, b = k - C * P.qp;
+    R.qmax = C > 0 ? (-b + Math.sqrt(b * b + 4 * C * R.avail)) / (2 * C) : R.avail / k;
+  }
 
   // 통계
   const stat = (k, v, u, key) => `<div class="stat${key ? ' key' : ''}"><span class="k">${k}</span><span class="v">${v}<small>${u}</small></span></div>`;
@@ -369,9 +384,7 @@ function calc() {
   // 단계 예측
   steps.forEach((s, i) => {
     if (fit && fit.b > 0 && steps.slice(0, i + 1).every(x => isFinite(x.q) && x.d > 0)) {
-      let sum = 0;
-      for (let j = 0; j <= i; j++) sum += sAt(steps[j].q - (j ? steps[j - 1].q : 0), s.end - steps[j].start);
-      s.sw = P.sf * sum; s.wl = P.nat + s.sw; s.room = P.pump - s.wl;
+      s.sw = sTot(s.end); s.wl = P.nat + s.sw; s.room = P.pump - s.wl;
     }
     const c = $('c' + i);
     $('es' + i).textContent = fx(s.sw, 2); $('ew' + i).textContent = fx(s.wl, 2); $('em' + i).textContent = fx(s.room, 2);
@@ -386,7 +399,7 @@ function calc() {
   const pc = $('pchip'), maxQ = Math.max(...steps.map(s => s.q).filter(isFinite));
   R.plan = {};
   if (fit && fit.b > 0 && P.plan > 0) {
-    R.plan.sw = P.sf * sAt(P.plan, R.dur); R.plan.wl = P.nat + R.plan.sw; R.plan.room = P.pump - R.plan.wl;
+    R.plan.sw = Math.max(0, P.sf * sAt(P.plan, R.dur) + wellLoss(P.plan)); R.plan.wl = P.nat + R.plan.sw; R.plan.room = P.pump - R.plan.wl;
   }
   $('pslbl').firstChild.textContent = `${R.dur}분 연속 강하 (m)`;
   $('ps').textContent = fx(R.plan.sw, 2); $('pw').textContent = fx(R.plan.wl, 2); $('pm').textContent = fx(R.plan.room, 2);
@@ -401,7 +414,7 @@ function calc() {
     : `단계 최대 양수량 ${isFinite(maxQ) ? maxQ : '–'} m³/일이 취수계획량 ${P.plan} m³/일보다 작습니다. 마지막 단계 양수량을 계획량 이상으로 올리세요.`;
   R.planCovered = covered;
 
-  last = { P, R, fit, sAt };
+  last = { P, R, fit, sTot };
   drawSemilog(); drawCurve(); writeOut(); save();
 }
 
@@ -440,16 +453,12 @@ function drawSemilog() {
 
 function drawCurve() {
   const svg = $('curve'); svg.innerHTML = '';
-  const { P, R, fit, sAt } = last; const W = 340, H = 220, L = 40, Rm = 10, T = 12, B = 28;
+  const { P, R, fit, sTot } = last; const W = 340, H = 220, L = 40, Rm = 10, T = 12, B = 28;
   const total = Math.max(R.total || 0, 30);
   const xs = t => L + t / total * (W - L - Rm);
   const series = [];
   const ok = fit && fit.b > 0 && R.steps.every(s => isFinite(s.q) && s.d > 0);
-  if (ok) for (let t = 1; t <= total; t++) {
-    let sum = 0;
-    R.steps.forEach((s, j) => { if (t > s.start) sum += sAt(s.q - (j ? R.steps[j - 1].q : 0), t - s.start); });
-    series.push([t, P.nat + P.sf * sum]);
-  }
+  if (ok) for (let t = 1; t <= total; t++) series.push([t, P.nat + sTot(t)]);
   const lo = Math.floor(P.nat - 1), hiRaw = Math.max(P.pump, ...series.map(p => p[1]), ...R.pts.map(p => p.s + P.nat)) + 1;
   const hi = lo + niceMax(hiRaw - lo);
   const ys = v => T + (v - lo) / (hi - lo) * (H - T - B);   // 깊을수록 아래
@@ -479,7 +488,7 @@ function writeOut() {
   const { P, R, fit } = last;
   const lines = [
     `[단계양수 계획 - ${$('well').value}] (30분 예비시험 기반 예측값)`,
-    `자연수위 ${P.nat} m / 펌프 ${P.pump} m / 예비 Qp ${P.qp} m³/일 / 안전율 ${P.sf}`,
+    `자연수위 ${P.nat} m / 펌프 ${P.pump} m / 예비 Qp ${P.qp} m³/일 / 안전율 ${P.sf} / 우물손실계수 C ${P.cw > 0 ? P.cw : 0}×10⁻⁴ 일²/m⁵`,
     `Δs ${fx(fit && fit.b, 3)} m, a ${fx(fit && fit.a, 3)} m, R² ${fx(fit && fit.r2, 3)}`,
     `T ${fx(R.T, 2)} m²/일, S(참고) ${isFinite(R.S) ? R.S.toExponential(1) : '–'}, 가용강하 ${fx(R.avail, 2)} m, ${R.dur}분 연속 최대Q ${fx(R.qmax, 0)} m³/일`,
     '예비시험 수위: ' + R.pts.map(p => `${p.t}분 ${(p.s + P.nat).toFixed(2)}`).join(', '),
@@ -548,7 +557,7 @@ calcMeter();
 // 엑셀 다운로드 (downloads 기능이 있는 화면에서만 버튼 표시)
 const r3 = v => Number.isFinite(v) ? Math.round(v * 1000) / 1000 : '';
 function buildWorkbook() {
-  const { P, R, fit, sAt } = last;
+  const { P, R, fit, sTot } = last;
   const well = $('well').value || '시험정';
   const sheet = (rows, widths) => { const s = XLSX.utils.aoa_to_sheet(rows); s['!cols'] = widths.map(w => ({ wch: w })); return s; };
   const wb = XLSX.utils.book_new();
@@ -558,6 +567,7 @@ function buildWorkbook() {
     ['관정명', well], ['자연수위 (m)', P.nat], ['펌프 설치심도 (m)', P.pump], ['펌프 위 안전여유 (m)', P.margin],
     ['양수능력 (m³/일)', P.cap], ['예비 양수량 Qp (m³/일)', P.qp], ['취수계획량 (m³/일)', P.plan],
     ['굴착지름 (mm)', P.dia], ['해석 시작시간 (분)', P.t0], ['안전율', P.sf],
+    ['우물손실계수 C (×10⁻⁴ 일²/m⁵)', P.cw > 0 ? P.cw : 0],
     [],
     ['Cooper-Jacob 해석'],
     ['기울기 Δs (m/log주기)', r3(fit && fit.b)], ['절편 a (m, t=1분)', r3(fit && fit.a)], ['결정계수 R²', r3(fit && fit.r2)],
@@ -575,13 +585,12 @@ function buildWorkbook() {
     [],
     ['취수계획량 검토', P.plan, R.dur, 0, R.dur, r3(R.plan.sw), r3(R.plan.wl), r3(R.plan.room), $('pchip').textContent],
     [],
-    ['예상 강하 = 안전율 × Σ ΔQj/Qp × (a + Δs·log t), Jacob 중첩. 고양수량 단계는 우물손실(CQ²)로 더 깊어질 수 있음.'],
+    ['예상 강하 = 안전율 × Σ ΔQj/Qp × (a + Δs·log t) + C·Q·(Q − Qp), Jacob 중첩. C = 0이면 우물손실 비선형 보정 없음.'],
   ], [16, 16, 13, 10, 10, 16, 16, 16, 20]), '단계 계획');
   const curve = [['경과시간 (분)', '예상 수위강하 (m)', '예상 수위 (m)']];
   if (fit && fit.b > 0) for (let t = 1; t <= R.total; t++) {
-    let sum = 0;
-    R.steps.forEach((s, j) => { if (t > s.start) sum += sAt(s.q - (j ? R.steps[j - 1].q : 0), t - s.start); });
-    curve.push([t, r3(P.sf * sum), r3(P.nat + P.sf * sum)]);
+    const s = sTot(t);
+    curve.push([t, r3(s), r3(P.nat + s)]);
   }
   XLSX.utils.book_append_sheet(wb, sheet(curve, [14, 16, 14]), '예측곡선');
   return XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
