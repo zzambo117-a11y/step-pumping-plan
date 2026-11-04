@@ -145,9 +145,9 @@ textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color
 <div class="wrap">
   <header>
     <h1>단계양수 현장계획</h1>
-    <p>30분 예비양수 실측 → Cooper-Jacob 해석 → 단계양수시험 양수량 계획</p>
+    <p>30분 예비양수 실측 → Cooper-Jacob 해석 → 단계·장기양수시험 예측</p>
   </header>
-  <div class="notice">이 화면의 단계별 수위는 30분 자료로 추정한 계획값입니다. 단계양수시험일보는 실측 자료로 작성하세요.</div>
+  <div class="notice">이 화면의 단계별·장기 수위는 30분 자료로 추정한 계획값입니다. 시험일보는 실측 자료로 작성하세요.</div>
 
   <section>
     <h2><span class="step">STEP 1</span>관정·예비시험 조건</h2>
@@ -237,6 +237,36 @@ textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color
   </section>
 
   <section>
+    <h2><span class="step">STEP 5</span>장기양수시험 예측</h2>
+    <div class="grid2">
+      <label class="f">양수량 (m³/일)<input id="lq" inputmode="decimal" placeholder="비우면 취수계획량"></label>
+      <label class="f">시험시간 (분)<input id="ld" inputmode="decimal" value="1440"></label>
+    </div>
+    <div class="stepc">
+      <div class="top"><b id="lttl">종료 시점</b><span class="chip ok" id="lchip">–</span></div>
+      <div class="out">
+        <div>예상 강하 (m)<span id="ls">–</span></div>
+        <div>예상 수위 (m)<span id="lw">–</span></div>
+        <div>펌프까지 여유 (m)<span id="lm">–</span></div>
+      </div>
+      <div class="out">
+        <div>연속 최대 양수량<span id="lqmax">–</span></div>
+        <div>T (m²/일)<span id="lt">–</span></div>
+        <div>회복 90% 예상<span id="lrec">–</span></div>
+      </div>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>경과</th><th>예상 강하 (m)</th><th>예상 수위 (m)</th></tr></thead>
+        <tbody id="lrows"></tbody>
+      </table>
+    </div>
+    <svg id="lcurve" viewBox="0 0 340 220" role="img" aria-label="장기양수 예상 수위 곡선 (로그 시간)"></svg>
+    <p class="hint">실선: 예상 수위(안전율 포함) · 점선: 안전율 없는 Jacob 연장 · 점: 30분 실측. 장기시험 중 실측 수위를 표의 예상 수위와 비교하세요. 실측이 점선보다 뚜렷이 얕아지면 수위안정화(함양·누수), 실선보다 깊어지면 불투수 경계나 우물 막힘을 의심합니다.</p>
+    <p class="hint">회복 90% 예상: 양수 중지 후 잔류강하가 종료 강하의 10%가 되는 시간 (Theis 회복식). 검증 예: 음성 ES-03 연속양수 350 m³/일, 30분 자료로 720분 강하 9.21 m 예측(안전율 1.2 적용 11.05 m), 실측 9.73 m.</p>
+  </section>
+
+  <section>
     <h2><span class="step">기록</span>결과 저장</h2>
     <div class="row">
       <button class="primary" id="xlsx" type="button" hidden>엑셀 다운로드</button>
@@ -259,7 +289,8 @@ const num = v => { const x = parseFloat(String(v).replace(',', '.')); return isF
 const fx = (v, d) => Number.isFinite(v) ? v.toFixed(d) : '–';
 
 let state = { levels: EXAMPLE.slice(), example: true, steps: RATIOS.map(r => ({ q: Math.round(100 * r), d: 60 })) };
-const FIELDS = ['well', 'nat', 'pump', 'margin', 'cap', 'qp', 'dia', 't0', 'sf', 'plan', 'cw'];
+const FIELDS = ['well', 'nat', 'pump', 'margin', 'cap', 'qp', 'dia', 't0', 'sf', 'plan', 'cw', 'lq', 'ld'];
+const LONG_TIMES = [60, 120, 240, 360, 480, 720, 1080, 1440, 2160, 2880, 4320];   // 장기시험 확인 시각(분)
 
 function load() {
   try {
@@ -298,6 +329,7 @@ function buildSteps() {
         <div>예상 종료수위 (m)<span id="ew${i}">–</span></div>
         <div>펌프까지 여유 (m)<span id="em${i}">–</span></div>
       </div>
+      <p class="hint" id="sq${i}"></p>
     </div>`).join('');
   state.steps.forEach((s, i) => {
     $('q' + i).addEventListener('input', e => { state.steps[i].q = e.target.value; calc(); });
@@ -357,11 +389,12 @@ function calc() {
     steps.forEach((s, j) => { if (t > s.start) { sum += sAt(s.q - (j ? steps[j - 1].q : 0), t - s.start); q = s.q; } });
     return Math.max(0, P.sf * sum + wellLoss(q));
   };
-  if (fit) {
-    // avail = k·Q + C·Q·(Q−Qp) 를 Q에 대해 풂 (C=0이면 직선)
-    const k = P.sf * (fit.a + fit.b * Math.log10(R.dur)) / P.qp, b = k - C * P.qp;
-    R.qmax = C > 0 ? (-b + Math.sqrt(b * b + 4 * C * R.avail)) / (2 * C) : R.avail / k;
-  }
+  // dur분 연속양수에서 가용강하를 다 쓰는 양수량: avail = k·Q + C·Q·(Q−Qp) 를 Q에 대해 풂 (C=0이면 직선)
+  const qmaxAt = dur => {
+    const k = P.sf * (fit.a + fit.b * Math.log10(dur)) / P.qp, b = k - C * P.qp;
+    return C > 0 ? (-b + Math.sqrt(b * b + 4 * C * R.avail)) / (2 * C) : R.avail / k;
+  };
+  if (fit) R.qmax = qmaxAt(R.dur);
 
   // 통계
   const stat = (k, v, u, key) => `<div class="stat${key ? ' key' : ''}"><span class="k">${k}</span><span class="v">${v}<small>${u}</small></span></div>`;
@@ -388,6 +421,7 @@ function calc() {
     }
     const c = $('c' + i);
     $('es' + i).textContent = fx(s.sw, 2); $('ew' + i).textContent = fx(s.wl, 2); $('em' + i).textContent = fx(s.room, 2);
+    $('sq' + i).textContent = isFinite(s.sw) && s.q > 0 ? `비수위강하 sw/Q ${(s.sw / s.q).toFixed(5)} 일/m²` : '';
     if (!isFinite(s.room)) { c.className = 'chip warn'; c.textContent = '입력 확인'; }
     else if (i && s.q <= steps[i - 1].q) { c.className = 'chip warn'; c.textContent = '양수량 증가 필요'; }
     else if (s.room < 0) { c.className = 'chip bad'; c.textContent = '위험: 펌프 노출'; }
@@ -414,8 +448,34 @@ function calc() {
     : `단계 최대 양수량 ${isFinite(maxQ) ? maxQ : '–'} m³/일이 취수계획량 ${P.plan} m³/일보다 작습니다. 마지막 단계 양수량을 계획량 이상으로 올리세요.`;
   R.planCovered = covered;
 
+  // 장기양수시험: 한 양수량으로 연속양수 (기본 1440분, 양수량 비우면 취수계획량)
+  const L = R.long = { q: P.lq > 0 ? P.lq : P.plan, tp: P.ld > 0 ? P.ld : 1440, rows: [] };
+  const fitOk = fit && fit.b > 0;
+  L.sAt = t => Math.max(0, P.sf * sAt(L.q, t) + wellLoss(L.q));   // 안전율 포함
+  L.sRaw = t => Math.max(0, sAt(L.q, t) + wellLoss(L.q));          // 안전율 없는 Jacob 연장
+  if (fitOk && L.q > 0) {
+    L.sw = L.sAt(L.tp); L.wl = P.nat + L.sw; L.room = P.pump - L.wl;
+    L.qmax = qmaxAt(L.tp);
+    // Theis 회복: 잔류강하 s' = 안전율·(Q/Qp)·Δs·log((tp+t')/t'), 우물손실은 즉시 회복 → s' = 0.1·sw 인 t'
+    const x = 0.1 * L.sw / (P.sf * L.q / P.qp * fit.b);
+    L.rec90 = x > 0 ? L.tp / (Math.pow(10, x) - 1) : NaN;
+    L.rows = [...LONG_TIMES.filter(t => t < L.tp), L.tp].map(t => ({ t, s: L.sAt(t), wl: P.nat + L.sAt(t) }));
+  }
+  const lc = $('lchip');
+  $('lttl').textContent = `${L.tp}분 종료 시점 (Q ${isFinite(L.q) ? L.q : '–'} m³/일)`;
+  $('ls').textContent = fx(L.sw, 2); $('lw').textContent = fx(L.wl, 2); $('lm').textContent = fx(L.room, 2);
+  $('lqmax').textContent = isFinite(L.qmax) ? `${L.qmax.toFixed(0)} m³/일` : '–';
+  $('lt').textContent = fx(R.T, 1);
+  $('lrec').textContent = !isFinite(L.rec90) ? '–' : L.rec90 < 120 ? `${L.rec90.toFixed(0)}분` : `${(L.rec90 / 60).toFixed(1)}시간`;
+  if (!isFinite(L.room)) { lc.className = 'chip warn'; lc.textContent = '입력 확인'; }
+  else if (L.room < 0) { lc.className = 'chip bad'; lc.textContent = '위험: 펌프 노출'; }
+  else if (L.room < P.margin) { lc.className = 'chip warn'; lc.textContent = '주의: 안전여유 부족'; }
+  else { lc.className = 'chip ok'; lc.textContent = '가능'; }
+  $('lrows').innerHTML = L.rows.map(r =>
+    `<tr><td>${r.t}분${r.t >= 60 && r.t % 60 === 0 ? ` <small>(${r.t / 60}h)</small>` : ''}</td><td>${r.s.toFixed(2)}</td><td>${r.wl.toFixed(2)}</td></tr>`).join('');
+
   last = { P, R, fit, sTot };
-  drawSemilog(); drawCurve(); writeOut(); save();
+  drawSemilog(); drawCurve(); drawLong(); writeOut(); save();
 }
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -484,6 +544,46 @@ function drawCurve() {
   R.pts.forEach(p => svgEl(svg, 'circle', { class: 'pt', cx: xs(p.t), cy: ys(P.nat + p.s), r: 2.6 }));
 }
 
+// 장기양수: 로그 시간축, 수위는 깊을수록 아래
+function drawLong() {
+  const svg = $('lcurve'); svg.innerHTML = '';
+  const { P, R } = last, Lg = R.long; const W = 340, H = 220, L = 40, Rm = 10, T = 12, B = 28;
+  const dmax = Math.ceil(Math.log10(Math.max(Lg.tp, 100)));
+  const xs = t => L + Math.log10(t) / dmax * (W - L - Rm);
+  const series = [], raw = [];
+  if (Lg.rows.length) for (let i = 0; i <= 120; i++) {
+    const t = Math.pow(10, Math.log10(Lg.tp) * i / 120);
+    series.push([t, P.nat + Lg.sAt(t)]); raw.push([t, P.nat + Lg.sRaw(t)]);
+  }
+  const lo = Math.floor(P.nat - 1), hiRaw = Math.max(P.pump, ...series.map(p => p[1]), ...R.pts.map(p => p.s + P.nat)) + 1;
+  const hi = lo + niceMax(hiRaw - lo);
+  const ys = v => T + (v - lo) / (hi - lo) * (H - T - B);
+  const step = niceMax((hi - lo) / 5);
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+    svgEl(svg, 'line', { class: 'grid', x1: L, x2: W - Rm, y1: ys(v), y2: ys(v) });
+    svgEl(svg, 'text', { x: L - 5, y: ys(v) + 3, 'text-anchor': 'end' }, +v.toFixed(1));
+  }
+  for (let d = 0; d <= dmax; d++) {
+    const t = Math.pow(10, d);
+    svgEl(svg, 'line', { class: 'grid', x1: xs(t), x2: xs(t), y1: T, y2: H - B });
+    svgEl(svg, 'text', { x: xs(t), y: H - B + 13, 'text-anchor': 'middle' }, t);
+  }
+  svgEl(svg, 'text', { x: (L + W) / 2, y: H - 2, 'text-anchor': 'middle' }, '경과시간 (분, log)');
+  if (isFinite(P.pump)) {
+    svgEl(svg, 'line', { class: 'pump', x1: L, x2: W - Rm, y1: ys(P.pump), y2: ys(P.pump) });
+    svgEl(svg, 'text', { class: 'lbl-bad', x: W - Rm - 2, y: ys(P.pump) - 4, 'text-anchor': 'end' }, `펌프 ${P.pump} m`);
+    const lim = P.pump - P.margin;
+    svgEl(svg, 'line', { class: 'limit', x1: L, x2: W - Rm, y1: ys(lim), y2: ys(lim) });
+  }
+  if (Lg.rows.length) {
+    svgEl(svg, 'line', { class: 'grid', x1: xs(Lg.tp), x2: xs(Lg.tp), y1: T, y2: H - B, 'stroke-dasharray': '3 3' });
+    const pl = s => s.map(([t, v]) => `${xs(t).toFixed(1)},${ys(v).toFixed(1)}`).join(' ');
+    svgEl(svg, 'polyline', { class: 'fit', points: pl(raw) });
+    svgEl(svg, 'polyline', { class: 'curve', points: pl(series) });
+  }
+  R.pts.forEach(p => svgEl(svg, 'circle', { class: 'pt used', cx: xs(p.t), cy: ys(P.nat + p.s), r: 2.6 }));
+}
+
 function writeOut() {
   const { P, R, fit } = last;
   const lines = [
@@ -494,6 +594,8 @@ function writeOut() {
     '예비시험 수위: ' + R.pts.map(p => `${p.t}분 ${(p.s + P.nat).toFixed(2)}`).join(', '),
     ...R.steps.map((s, i) => `${i + 1}단계 Q=${s.q} (${s.start}~${s.end}분): 예상강하 ${fx(s.sw, 2)} m, 수위 ${fx(s.wl, 2)} m, 펌프여유 ${fx(s.room, 2)} m — ${$('c' + i).textContent}`),
     `취수계획량 ${P.plan} m³/일 ${R.dur}분 연속: 예상강하 ${fx(R.plan.sw, 2)} m, 수위 ${fx(R.plan.wl, 2)} m, 펌프여유 ${fx(R.plan.room, 2)} m — ${$('pchip').textContent}`,
+    `장기양수 Q=${R.long.q} m³/일 ${R.long.tp}분: 예상강하 ${fx(R.long.sw, 2)} m, 수위 ${fx(R.long.wl, 2)} m, 펌프여유 ${fx(R.long.room, 2)} m — ${$('lchip').textContent} / ${R.long.tp}분 연속 최대Q ${fx(R.long.qmax, 0)} m³/일 / 회복 90% ${$('lrec').textContent}`,
+    '장기 확인 시각: ' + R.long.rows.map(r => `${r.t}분 ${r.wl.toFixed(2)} m`).join(', '),
   ];
   $('out').value = lines.join('\n');
 }
@@ -580,19 +682,30 @@ function buildWorkbook() {
     ...R.pts.map(p => [p.t, r3(p.s + P.nat), r3(p.s), p.used ? '○' : '-']),
   ], [14, 12, 14, 10]), '30분 실측');
   XLSX.utils.book_append_sheet(wb, sheet([
-    ['단계', '양수량 Q (m³/일)', '양수시간 (분)', '시작 (분)', '종료 (분)', '예상 수위강하 (m)', '예상 종료수위 (m)', '펌프까지 여유 (m)', '판정'],
-    ...R.steps.map((s, i) => [`${i + 1}단계`, s.q, s.d, s.start, s.end, r3(s.sw), r3(s.wl), r3(s.room), $('c' + i).textContent]),
+    ['단계', '양수량 Q (m³/일)', '양수시간 (분)', '시작 (분)', '종료 (분)', '예상 수위강하 (m)', '예상 종료수위 (m)', '펌프까지 여유 (m)', '판정', 'sw/Q (일/m²)'],
+    ...R.steps.map((s, i) => [`${i + 1}단계`, s.q, s.d, s.start, s.end, r3(s.sw), r3(s.wl), r3(s.room), $('c' + i).textContent, isFinite(s.sw) && s.q > 0 ? Number((s.sw / s.q).toFixed(5)) : '']),
     [],
     ['취수계획량 검토', P.plan, R.dur, 0, R.dur, r3(R.plan.sw), r3(R.plan.wl), r3(R.plan.room), $('pchip').textContent],
     [],
     ['예상 강하 = 안전율 × Σ ΔQj/Qp × (a + Δs·log t) + C·Q·(Q − Qp), Jacob 중첩. C = 0이면 우물손실 비선형 보정 없음.'],
-  ], [16, 16, 13, 10, 10, 16, 16, 16, 20]), '단계 계획');
+  ], [16, 16, 13, 10, 10, 16, 16, 16, 20, 13]), '단계 계획');
   const curve = [['경과시간 (분)', '예상 수위강하 (m)', '예상 수위 (m)']];
   if (fit && fit.b > 0) for (let t = 1; t <= R.total; t++) {
     const s = sTot(t);
     curve.push([t, r3(s), r3(P.nat + s)]);
   }
   XLSX.utils.book_append_sheet(wb, sheet(curve, [14, 16, 14]), '예측곡선');
+  const Lg = R.long;
+  XLSX.utils.book_append_sheet(wb, sheet([
+    ['장기양수시험 예측 (30분 예비시험 기반, 예측값)'],
+    ['양수량 (m³/일)', Lg.q], ['시험시간 (분)', Lg.tp],
+    ['예상 종료 강하 (m)', r3(Lg.sw)], ['예상 종료 수위 (m)', r3(Lg.wl)], ['펌프까지 여유 (m)', r3(Lg.room)], ['판정', $('lchip').textContent],
+    [`${Lg.tp}분 연속양수 최대 양수량 (m³/일)`, isFinite(Lg.qmax) ? Math.round(Lg.qmax) : ''],
+    ['회복 90% 예상 시간 (분)', isFinite(Lg.rec90) ? Math.round(Lg.rec90) : ''],
+    [],
+    ['경과시간 (분)', '예상 수위강하 (m)', '예상 수위 (m)', '안전율 없는 강하 (m)'],
+    ...Lg.rows.map(r => [r.t, r3(r.s), r3(r.wl), r3(Lg.sRaw(r.t))]),
+  ], [30, 16, 14, 18]), '장기양수 예측');
   return XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
 }
 (() => {

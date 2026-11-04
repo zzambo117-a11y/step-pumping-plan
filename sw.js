@@ -1,4 +1,4 @@
-const CACHE_NAME = 'step-plan-v1';
+const CACHE_NAME = 'step-plan-v2';
 const ASSETS = [
   './',
   './index.html',
