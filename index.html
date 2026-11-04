@@ -280,6 +280,7 @@ textarea { width: 100%; font: 12px var(--font-num); background: var(--bg); color
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 const TIMES = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30];
 const EXAMPLE = [30.62, 31.05, 31.30, 31.46, 31.56, 31.92, 32.12, 32.24, 32.33, 32.40];
@@ -736,14 +737,41 @@ function buildWorkbook() {
     [],
     ['예상 강하 = 안전율 × Σ ΔQj/Qp × (a + Δs·log t) + C·Q·(Q − Qp), Jacob 중첩. C = 0이면 우물손실 비선형 보정 없음.'],
   ], [16, 16, 13, 10, 10, 16, 16, 16, 20, 13]), '단계 계획');
-  const curve = [['경과시간 (분)', '예상 수위강하 (m)', '예상 수위 (m)']];
+  const curve = [['경과시간 (분)', '예상 수위강하 (m)', '예상 수위 (m)', '펌프 설치심도 (m)']];
   if (fit && fit.b > 0) for (let t = 1; t <= R.total; t++) {
     const s = sTot(t);
-    curve.push([t, r3(s), r3(P.nat + s)]);
+    curve.push([t, r3(s), r3(P.nat + s), P.pump]);
   }
-  XLSX.utils.book_append_sheet(wb, sheet(curve, [14, 16, 14]), '예측곡선');
+  XLSX.utils.book_append_sheet(wb, sheet(curve, [14, 16, 14, 16]), '예측곡선');
+  // 차트 공통: 30분 실측점, 수위축 범위(깊을수록 아래)
+  const charts = [], nPts = R.pts.length;
+  const measured = { name: '예비시험 실측', sheet: '30분 실측', x: 'A', y: 'B', r1: 2, xs: R.pts.map(p => p.t), ys: R.pts.map(p => r3(p.s + P.nat)), color: '0F6B82', marker: true };
+  // 앱 그래프와 같은 눈금: 간격 = niceMax(범위/5), 최솟값은 간격의 배수로 내림
+  const yRange = levels => {
+    const top = P.nat - 1, bot = Math.max(P.pump, ...levels.filter(Number.isFinite)) + 1;
+    const unit = niceMax((bot - top) / 5), min = Math.floor(top / unit) * unit;
+    return { min, max: Math.ceil(bot / unit) * unit, unit };
+  };
+  if (curve.length > 2) {
+    const rows = curve.slice(1);
+    charts.push({
+      sheet: '예측곡선', at: [5, 1, 15, 24], title: `${well} 단계양수 예상 수위`, xTitle: '경과시간 (분)', yTitle: '수위 (m, 지표하)',
+      x: { min: 0, max: R.total, unit: niceMax(R.total / 6) }, y: yRange([...rows.map(r => r[2]), ...measured.ys]),
+      series: [
+        { name: '예상 수위', sheet: '예측곡선', x: 'A', y: 'C', r1: 2, xs: rows.map(r => r[0]), ys: rows.map(r => r[2]), color: '0F6B82' },
+        { name: '펌프 설치심도', sheet: '예측곡선', x: 'A', y: 'D', r1: 2, xs: rows.map(r => r[0]), ys: rows.map(r => r[3]), color: 'B3261E', dash: true },
+        ...(nPts ? [measured] : []),
+      ],
+    });
+  }
   const Lg = R.long;
-  XLSX.utils.book_append_sheet(wb, sheet([
+  // 장기 그래프용 로그 간격 곡선 (G~J열)
+  const lcurve = [];
+  if (Lg.rows.length) for (let i = 0; i <= 40; i++) {
+    const t = Math.round(10 ** (Math.log10(Lg.tp) * i / 40) * 100) / 100;
+    lcurve.push([t, r3(P.nat + Lg.sAt(t)), r3(P.nat + Lg.sTh(t)), P.pump]);
+  }
+  const lsheet = [
     ['장기양수시험 예측 (30분 예비시험 기반, 예측값)'],
     ['양수량 (m³/일)', Lg.q], ['시험시간 (분)', Lg.tp],
     ['예상 종료 강하 (m)', r3(Lg.sw)], ['예상 종료 수위 (m)', r3(Lg.wl)], ['펌프까지 여유 (m)', r3(Lg.room)], ['판정', $('lchip').textContent],
@@ -753,16 +781,101 @@ function buildWorkbook() {
     [],
     ['경과시간 (분)', '예상 수위강하 (m)', '예상 수위 (m)', '안전율 없는 강하 (m)', 'Theis 강하 (m)'],
     ...Lg.rows.map(r => [r.t, r3(r.s), r3(r.wl), r3(Lg.sRaw(r.t)), r3(Lg.sTh(r.t))]),
-  ], [30, 16, 14, 18, 14]), '장기양수 예측');
-  return XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  ];
+  if (lcurve.length) {
+    [['그래프용 경과시간 (분)', 'Jacob 예상 수위 (m)', 'Theis 예상 수위 (m)', '펌프 설치심도 (m)'], ...lcurve].forEach((r, i) => {
+      const row = lsheet[i] || (lsheet[i] = []);
+      r.forEach((v, j) => row[6 + j] = v);
+    });
+    const rows = lsheet.slice(1, lcurve.length + 1).map(r => r.slice(6));
+    charts.push({
+      sheet: '장기양수 예측', at: [11, 1, 21, 26], title: `${well} 장기양수 ${Lg.tp}분 예상 수위`, xTitle: '경과시간 (분, log)', yTitle: '수위 (m, 지표하)',
+      x: { min: 1, max: 10 ** Math.ceil(Math.log10(Math.max(Lg.tp, 100))), log: true }, y: yRange([...rows.map(r => r[1]), ...rows.map(r => r[2]), ...measured.ys]),
+      series: [
+        { name: 'Jacob 예상 수위 (안전율 포함)', sheet: '장기양수 예측', x: 'G', y: 'H', r1: 2, xs: rows.map(r => r[0]), ys: rows.map(r => r[1]), color: '0F6B82' },
+        ...(R.th ? [{ name: 'Theis 예상 수위 (안전율 포함)', sheet: '장기양수 예측', x: 'G', y: 'I', r1: 2, xs: rows.map(r => r[0]), ys: rows.map(r => r[2]), color: 'C77700' }] : []),
+        { name: '펌프 설치심도', sheet: '장기양수 예측', x: 'G', y: 'J', r1: 2, xs: rows.map(r => r[0]), ys: rows.map(r => r[3]), color: 'B3261E', dash: true },
+        ...(nPts ? [measured] : []),
+      ],
+    });
+  }
+  XLSX.utils.book_append_sheet(wb, sheet(lsheet, [30, 16, 14, 18, 14, 3, 20, 18, 18, 16]), '장기양수 예측');
+  return { data: XLSX.write(wb, { bookType: 'xlsx', type: 'array' }), charts };
+}
+
+// SheetJS 무료판은 차트를 쓰지 못하므로, 만든 xlsx를 JSZip으로 열어 차트(DrawingML) 부품을 직접 넣음
+const xmlEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const richTx = (text, sz) => `<c:tx><c:rich><a:bodyPr/><a:p><a:pPr><a:defRPr sz="${sz}" b="1"/></a:pPr><a:r><a:rPr lang="ko-KR" sz="${sz}" b="1"/><a:t>${xmlEsc(text)}</a:t></a:r></a:p></c:rich></c:tx>`;
+function chartXml(c) {
+  const cache = vals => `<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${vals.length}"/>${vals.map((v, i) => Number.isFinite(v) ? `<c:pt idx="${i}"><c:v>${v}</c:v></c:pt>` : '').join('')}</c:numCache>`;
+  const ref = (s, col, vals) => `<c:numRef><c:f>'${xmlEsc(s.sheet)}'!$${col}$${s.r1}:$${col}$${s.r1 + vals.length - 1}</c:f>${cache(vals)}</c:numRef>`;
+  const ser = (s, i) => `<c:ser><c:idx val="${i}"/><c:order val="${i}"/><c:tx><c:v>${xmlEsc(s.name)}</c:v></c:tx>`
+    + (s.marker
+      ? `<c:spPr><a:ln><a:noFill/></a:ln></c:spPr><c:marker><c:symbol val="circle"/><c:size val="5"/><c:spPr><a:solidFill><a:srgbClr val="${s.color}"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="${s.color}"/></a:solidFill></a:ln></c:spPr></c:marker>`
+      : `<c:spPr><a:ln w="${s.dash ? 15875 : 22225}"><a:solidFill><a:srgbClr val="${s.color}"/></a:solidFill>${s.dash ? '<a:prstDash val="dash"/>' : ''}</a:ln></c:spPr><c:marker><c:symbol val="none"/></c:marker>`)
+    + `<c:xVal>${ref(s, s.x, s.xs)}</c:xVal><c:yVal>${ref(s, s.y, s.ys)}</c:yVal><c:smooth val="0"/></c:ser>`;
+  const ax = (id, cross, pos, title, sc, lbl, extra) => `<c:valAx><c:axId val="${id}"/><c:scaling>${sc.log ? '<c:logBase val="10"/>' : ''}<c:orientation val="${sc.rev ? 'maxMin' : 'minMax'}"/><c:max val="${sc.max}"/><c:min val="${sc.min}"/></c:scaling>`
+    + `<c:delete val="0"/><c:axPos val="${pos}"/><c:majorGridlines><c:spPr><a:ln><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:title>${richTx(title, 1000)}<c:overlay val="0"/></c:title>`
+    + `<c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="${lbl}"/><c:crossAx val="${cross}"/>${extra}<c:crossBetween val="midCat"/>${sc.unit ? `<c:majorUnit val="${sc.unit}"/>` : ''}</c:valAx>`;
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    + `<c:roundedCorners val="0"/><c:chart><c:title>${richTx(c.title, 1200)}<c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/><c:plotArea><c:layout/>`
+    + `<c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>${c.series.map(ser).join('')}<c:axId val="1001"/><c:axId val="1002"/></c:scatterChart>`
+    // 수위축을 뒤집었으므로(깊을수록 아래) 시간축은 수위축 최댓값(아래쪽)에서 교차
+    + ax(1001, 1002, 'b', c.xTitle, c.x, 'nextTo', '<c:crosses val="max"/>')
+    + ax(1002, 1001, 'l', c.yTitle, { ...c.y, rev: true }, 'low', '<c:crosses val="autoZero"/>')
+    + '</c:plotArea><c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart></c:chartSpace>';
+}
+function drawingXml([c1, r1, c2, r2]) {
+  const pt = (tag, c, r) => `<xdr:${tag}><xdr:col>${c}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${r}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:${tag}>`;
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+    + `<xdr:twoCellAnchor>${pt('from', c1, r1)}${pt('to', c2, r2)}<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Chart 1"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>`
+    + '<xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+    + '<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1"/>'
+    + '</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>';
+}
+const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const rels = body => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${body}</Relationships>`;
+async function addCharts(data, charts) {
+  if (typeof JSZip === 'undefined' || !charts.length) return data;
+  const zip = await JSZip.loadAsync(data);
+  const read = p => zip.file(p).async('string');
+  const wbXml = await read('xl/workbook.xml'), wbRels = await read('xl/_rels/workbook.xml.rels');
+  let ct = await read('[Content_Types].xml');
+  const attr = (tag, k) => (tag.match(new RegExp(`\\s${k}="([^"]*)"`)) || [])[1];
+  for (const [i, c] of charts.entries()) {
+    const n = i + 1;
+    const sh = (wbXml.match(/<sheet\s[^>]*\/>/g) || []).find(t => attr(t, 'name') === xmlEsc(c.sheet));
+    const rid = sh && attr(sh, 'r:id');
+    const rel = rid && (wbRels.match(/<Relationship\s[^>]*\/>/g) || []).find(t => attr(t, 'Id') === rid);
+    if (!rel) continue;
+    const path = 'xl/' + attr(rel, 'Target').replace(/^\/?(xl\/)?/, '');
+    const relPath = path.replace(/([^/]+)$/, '_rels/$1.rels');
+    let sx = await read(path);
+    if (!/xmlns:r=/.test(sx)) sx = sx.replace('<worksheet', `<worksheet xmlns:r="${REL}"`);
+    zip.file(path, sx.replace('</worksheet>', '<drawing r:id="rIdChart1"/></worksheet>'));
+    const drawRel = `<Relationship Id="rIdChart1" Type="${REL}/drawing" Target="../drawings/drawing${n}.xml"/>`;
+    zip.file(relPath, zip.file(relPath) ? (await read(relPath)).replace('</Relationships>', drawRel + '</Relationships>') : rels(drawRel));
+    zip.file(`xl/drawings/drawing${n}.xml`, drawingXml(c.at));
+    zip.file(`xl/drawings/_rels/drawing${n}.xml.rels`, rels(`<Relationship Id="rId1" Type="${REL}/chart" Target="../charts/chart${n}.xml"/>`));
+    zip.file(`xl/charts/chart${n}.xml`, chartXml(c));
+    ct = ct.replace('</Types>', `<Override PartName="/xl/drawings/drawing${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`
+      + `<Override PartName="/xl/charts/chart${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/></Types>`);
+  }
+  zip.file('[Content_Types].xml', ct);
+  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }
 (() => {
   if (typeof XLSX === 'undefined') return;
   const btn = $('xlsx'); btn.hidden = false;
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
     const d = new Date(), ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
     try {
-      const blob = new Blob([buildWorkbook()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const { data, charts } = buildWorkbook();
+      let out = data;
+      try { out = await addCharts(data, charts); } catch (e) {}   // 차트 넣기에 실패해도 숫자 자료는 내려받음
+      const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `${$('well').value || '시험정'}_단계양수계획_${ymd}.xlsx`;
